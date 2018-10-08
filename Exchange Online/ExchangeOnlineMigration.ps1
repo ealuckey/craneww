@@ -1,4 +1,4 @@
-$credential = Get-Credential
+$credential = Get-Credential 
 
 #Connect to MS Online Service
 try {
@@ -27,25 +27,42 @@ catch {
 
 
 #Create custom SKU that only enables Exchange, Skype, Office, and Sharepoint
+Write-Host "Creating Custom Sku..." -ForegroundColor Yellow -BackgroundColor Black
 $O365StandardSku = New-MsolLicenseOptions -AccountSkuId craneww0:ENTERPRISEPACK -DisabledPlans FORMS_PLAN_E3,STREAM_O365_E3,Deskless,FLOW_O365_P2,POWERAPPS_O365_P2,TEAMS1,PROJECTWORKMANAGEMENT,SWAY,INTUNE_O365,YAMMER_ENTERPRISE,RMS_S_ENTERPRISE
 
 #Import the userlist containing UPNs
+Write-Host "Importing Batch Members..." -ForegroundColor Yellow -BackgroundColor Black
 $batch = Import-CSV C:\Support\O365\RemoteOnBoarding.csv
 
 #Ask for a new batch name for the migration batch creation
 $BatchName = Read-Host -Prompt 'Input your batch name >> '
 
 #Must remove existing license and readd with correct disabled plans
+Write-Host "Attempting to fixup licensing.." -ForegroundColor Yellow -BackgroundColor Black
 foreach ($user in $batch) {
-	Write-Host "Removing existing license options for $user.UserPrincipalName"
-	Get-MsolUser -UserPrincipalName $user.UserPrincipalName | Set-MsolUserLicense -RemoveLicenses craneww0:ENTERPRISEPACK
-	Write-Host "Adding new license options for $user.UserPrincipalName"
-	Set-MsolUserLicense -UserPrincipalName $user.UserPrincipalName -AddLicenses craneww0:ENTERPRISEPACK -LicenseOptions $O365StandardSku
+    try {
+        Write-Host "Removing existing license options for" $user.UserPrincipalName
+        Get-MsolUser -UserPrincipalName $user.UserPrincipalName | Set-MsolUserLicense -RemoveLicenses craneww0:ENTERPRISEPACK
+    }
+    catch {
+        Write-Host "Error removing license for " $user.UserPrincipalName -ForegroundColor Red -BackgroundColor Black
+    }
+
+    try {
+        Write-Host "Adding new license options for" $user.UserPrincipalName
+        Set-MsolUserLicense -UserPrincipalName $user.UserPrincipalName -AddLicenses craneww0:ENTERPRISEPACK -LicenseOptions $O365StandardSku
+    }
+    catch {
+        Write-Host "Error re-adding license for " $user.UserPrincipalName -ForegroundColor Red -BackgroundColor Black
+    }
 }
 
 #Create a new migration batch and start the initial sync. Batch must be manually completed
+Write-Host "Creating new migration batch.." -ForegroundColor Yellow -BackgroundColor Black
 $OnboardingBatch = New-MigrationBatch -Name $BatchName -SourceEndpoint CraneWorldWide -TargetDeliveryDomain craneww0.mail.onmicrosoft.com -BadItemLimit 10 -LargeItemLimit 10 -CSVData ([System.IO.File]::ReadAllBytes("C:\Support\O365\RemoteOnBoarding.csv")) -AllowUnknownColumnsInCsv $true
+Write-Host "Starting migration batch.." -ForegroundColor Yellow -BackgroundColor Black
 Start-MigrationBatch -Identity $OnboardingBatch.Identity
 
 #Cleanup 
+Write-Host "Cleaning up.." -ForegroundColor Yellow -BackgroundColor Black
 Get-PSSession | Remove-PSSession
