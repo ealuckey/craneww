@@ -1,5 +1,3 @@
-$credential = Get-Credential 
-
 Param(
     [Parameter(Mandatory=$true)]
     [string]$BatchCsv,
@@ -7,6 +5,11 @@ Param(
     [Parameter(Mandatory=$true)]
     [string]$BatchName
 )
+
+$credential = Get-Credential 
+
+$batchPath = Split-Path $BatchCsv
+$batchAudited = "$batchPath\MigrationBatch-$(get-date -f MM-dd-yyyy-hhmm).csv" 
 
 #Connect to MS Online Service
 try {
@@ -40,13 +43,37 @@ $O365StandardSku = New-MsolLicenseOptions -AccountSkuId craneww0:ENTERPRISEPACK 
 
 #Import the userlist containing UPNs
 Write-Host "Importing Batch Members..." -ForegroundColor Yellow -BackgroundColor Black
-$batch = Import-CSV $BatchCsv
+$preCheckBatch = Import-CSV $BatchCsv
 
-#Must remove existing license and readd with correct disabled plans
+#Check user list for existence of E3 license and output
+Write-Host "Auditing Batch Members for E3 License Assignment..." -ForegroundColor Yellow -BackgroundColor Black 
+foreach ($user in $preCheckBatch) {
+    $licenseCheck = Get-MsolUser -UserPrincipalName $user.UserPrincipalName -ErrorAction SilentlyContinue
+    if ($licenseCheck.Licenses.AccountSkuId -like "craneww0:ENTERPRISEPACK") {
+        $user.hasLicense = $true
+    }
+    else {
+        $user.hasLicense = $false
+        Write-Host "User" $user.userPrincipalName "does not have an E3 license, removing from batch file." -ForegroundColor Red -BackgroundColor Black
+    }
+}
+
+#Write users who have an E3 license into a new batch file.
+try {
+    Write-Host "Writing audited batch file to $batchAudited..." -ForegroundColor Yellow -BackgroundColor Black
+    $preCheckBatch | Where-Object { $_.hasLicense -eq $true } | Export-CSV -Path $batchAudited -NoTypeInformation
+    $batch = Import-CSV $batchAudited
+}
+catch {
+    Write-Host "Error creating audited batch file. Aborting." -ForegroundColor Red -BackgroundColor Black
+    break
+}
+
+#Must remove existing license and readd with correct plans
 Write-Host "Attempting to fixup licensing.." -ForegroundColor Yellow -BackgroundColor Black
 foreach ($user in $batch) {
     try {
-        Write-Host "Removing existing license options for" $user.UserPrincipalName
+        #Write-Host "Removing existing license options for" $user.UserPrincipalName
         Get-MsolUser -UserPrincipalName $user.UserPrincipalName | Set-MsolUserLicense -RemoveLicenses craneww0:ENTERPRISEPACK
     }
     catch {
@@ -54,7 +81,7 @@ foreach ($user in $batch) {
     }
 
     try {
-        Write-Host "Adding new license options for" $user.UserPrincipalName
+        #Write-Host "Adding new license options for" $user.UserPrincipalName
         Set-MsolUserLicense -UserPrincipalName $user.UserPrincipalName -AddLicenses craneww0:ENTERPRISEPACK -LicenseOptions $O365StandardSku
     }
     catch {
@@ -64,7 +91,7 @@ foreach ($user in $batch) {
 
 #Create a new migration batch and start the initial sync. Batch must be manually completed
 Write-Host "Creating new migration batch.." -ForegroundColor Yellow -BackgroundColor Black
-$OnboardingBatch = New-MigrationBatch -Name $BatchName -SourceEndpoint CraneWorldWide -TargetDeliveryDomain craneww0.mail.onmicrosoft.com -BadItemLimit 10 -LargeItemLimit 10 -CSVData ([System.IO.File]::ReadAllBytes("$BatchCsv")) -AllowUnknownColumnsInCsv $true
+$OnboardingBatch = New-MigrationBatch -Name $BatchName -SourceEndpoint CraneWorldWide -TargetDeliveryDomain craneww0.mail.onmicrosoft.com -BadItemLimit 10 -LargeItemLimit 10 -CSVData ([System.IO.File]::ReadAllBytes("$batchAudited")) -AllowUnknownColumnsInCsv $true
 
 #Sleep 10 seconds to wait for Migration Batch 
 Start-Sleep -Seconds 10
