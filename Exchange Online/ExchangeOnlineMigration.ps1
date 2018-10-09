@@ -1,5 +1,13 @@
 $credential = Get-Credential 
 
+Param(
+    [Parameter(Mandatory=$true)]
+    [string]$BatchCsv,
+
+    [Parameter(Mandatory=$true)]
+    [string]$BatchName
+)
+
 #Connect to MS Online Service
 try {
     Write-Host "Connecting to MS Online.." -ForegroundColor Yellow -BackgroundColor Black
@@ -32,10 +40,7 @@ $O365StandardSku = New-MsolLicenseOptions -AccountSkuId craneww0:ENTERPRISEPACK 
 
 #Import the userlist containing UPNs
 Write-Host "Importing Batch Members..." -ForegroundColor Yellow -BackgroundColor Black
-$batch = Import-CSV C:\Support\O365\RemoteOnBoarding.csv
-
-#Ask for a new batch name for the migration batch creation
-$BatchName = Read-Host -Prompt 'Input your batch name >> '
+$batch = Import-CSV $BatchCsv
 
 #Must remove existing license and readd with correct disabled plans
 Write-Host "Attempting to fixup licensing.." -ForegroundColor Yellow -BackgroundColor Black
@@ -59,7 +64,12 @@ foreach ($user in $batch) {
 
 #Create a new migration batch and start the initial sync. Batch must be manually completed
 Write-Host "Creating new migration batch.." -ForegroundColor Yellow -BackgroundColor Black
-$OnboardingBatch = New-MigrationBatch -Name $BatchName -SourceEndpoint CraneWorldWide -TargetDeliveryDomain craneww0.mail.onmicrosoft.com -BadItemLimit 10 -LargeItemLimit 10 -CSVData ([System.IO.File]::ReadAllBytes("C:\Support\O365\RemoteOnBoarding.csv")) -AllowUnknownColumnsInCsv $true
+$OnboardingBatch = New-MigrationBatch -Name $BatchName -SourceEndpoint CraneWorldWide -TargetDeliveryDomain craneww0.mail.onmicrosoft.com -BadItemLimit 10 -LargeItemLimit 10 -CSVData ([System.IO.File]::ReadAllBytes("$BatchCsv")) -AllowUnknownColumnsInCsv $true
+
+#Sleep 10 seconds to wait for Migration Batch 
+Start-Sleep -Seconds 10
+
+#Start migration batch
 Write-Host "Starting migration batch.." -ForegroundColor Yellow -BackgroundColor Black
 Start-MigrationBatch -Identity $OnboardingBatch.Identity
 
